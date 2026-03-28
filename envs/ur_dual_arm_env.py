@@ -139,12 +139,33 @@ class URDualArmEnv(gym.Env):
         self.data = mujoco.MjData(self.model)
 
         self._n_arm   = 6
-        self._n_grip  = 1
-        self._n_per   = self._n_arm + self._n_grip
         self._n_arms  = 4
-        self._n_ctrl  = self._n_per * self._n_arms
+        self._n_ctrl  = 7 * self._n_arms  # 6 arm + 1 gripper actuator per arm (nu=28)
 
         arm_names = [c[0] for c in ARM_CFG]
+
+        # Get exact qpos address for each arm's shoulder_pan joint
+        self._arm_qpos_adr = [
+            self.model.jnt_qposadr[
+                mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, f"{n}_shoulder_pan_joint")
+            ]
+            for n in arm_names
+        ]
+        # Get exact qvel address for each arm's shoulder_pan joint
+        self._arm_qvel_adr = [
+            self.model.jnt_dofadr[
+                mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, f"{n}_shoulder_pan_joint")
+            ]
+            for n in arm_names
+        ]
+        # Gripper finger qpos (driver joint)
+        self._grip_qpos_adr = [
+            self.model.jnt_qposadr[
+                mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, f"{n}_{n}_gr-right_driver_joint")
+            ]
+            for n in arm_names
+        ]
+
         self._ee_sites = [
             mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, f"{n}_attachment_site")
             for n in arm_names
@@ -156,6 +177,14 @@ class URDualArmEnv(gym.Env):
         self._drop_positions = [np.array(c[5]) for c in ARM_CFG]
         self._obj_init_pos   = [np.array(c[3]) for c in ARM_CFG]
 
+        # Find qpos start of first arm object (after all joints)
+        self._obj_qpos_adr = [
+            self.model.jnt_qposadr[
+                mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, f"obj_{n}_joint")
+            ]
+            for n in arm_names
+        ]
+
         # obs per arm: qpos(6) + qvel(6) + ee(3) + obj(3) + drop(3) + gripper(1) = 22
         obs_dim = self._n_arms * 22
         self.observation_space = spaces.Box(-np.inf, np.inf, shape=(obs_dim,), dtype=np.float32)
@@ -165,24 +194,37 @@ class URDualArmEnv(gym.Env):
     def _get_obs(self):
         parts = []
         for i in range(self._n_arms):
-            s = i * self._n_per
-            parts.append(self.data.qpos[s:s+self._n_arm].astype(np.float32))
-            parts.append(self.data.qvel[s:s+self._n_arm].astype(np.float32))
+            qa = self._arm_qpos_adr[i]
+            va = self._arm_qvel_adr[i]
+            parts.append(self.data.qpos[qa:qa+self._n_arm].astype(np.float32))
+            parts.append(self.data.qvel[va:va+self._n_arm].astype(np.float32))
             parts.append(self.data.site_xpos[self._ee_sites[i]].astype(np.float32))
             parts.append(self.data.xpos[self._obj_ids[i]].astype(np.float32))
             parts.append(self._drop_positions[i].astype(np.float32))
-            parts.append(np.array([self.data.qpos[s + self._n_arm]], dtype=np.float32))
+            parts.append(np.array([self.data.qpos[self._grip_qpos_adr[i]]], dtype=np.float32))
         return np.concatenate(parts)
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         mujoco.mj_resetData(self.model, self.data)
 
-        # Reset each object to its start position
-        obj_qpos_start = self._n_per * self._n_arms
+        # Set arms to a "ready" pose — elbow bent forward, EE pointing down toward table
+        # UR5e joints: shoulder_pan, shoulder_lift, elbow, wrist_1, wrist_2, wrist_3
+        # Left arms (euler_z=0) need pan=pi to face +x (toward table)
+        # Right arms (euler_z=180) need pan=0 to face -x (toward table)
+        ready_poses = [
+            np.array([np.pi, -1.0, 1.5, -1.57, -1.57, 0.0]),  # left1
+            np.array([np.pi, -1.0, 1.5, -1.57, -1.57, 0.0]),  # left2
+            np.array([0.0,   -1.0, 1.5, -1.57, -1.57, 0.0]),  # right1
+            np.array([0.0,   -1.0, 1.5, -1.57, -1.57, 0.0]),  # right2
+        ]
+        for i in range(self._n_arms):
+            qa = self._arm_qpos_adr[i]
+            self.data.qpos[qa:qa + self._n_arm] = ready_poses[i]
+
+        # Reset each object using its exact qpos address
         for i, init_pos in enumerate(self._obj_init_pos):
-            # each freejoint: 3 pos + 4 quat = 7 dof, plus 8 extra items (decorative)
-            base = obj_qpos_start + i * 7
+            base = self._obj_qpos_adr[i]
             self.data.qpos[base:base+3] = init_pos
             self.data.qpos[base+3:base+7] = [1, 0, 0, 0]
 
@@ -190,13 +232,12 @@ class URDualArmEnv(gym.Env):
         return self._get_obs(), {}
 
     def step(self, action):
-        # Apply arm + gripper controls
+        # Apply arm + gripper controls (ctrl layout: 7 per arm = 6 arm + 1 gripper)
         for i in range(self._n_arms):
-            s = i * self._n_per
+            s = i * 7
             self.data.ctrl[s:s+self._n_arm] = action[s:s+self._n_arm] * 0.5
             grip_idx = s + self._n_arm
             if grip_idx < self.model.nu:
-                # action -1=open, +1=close → map to [0, 0.8]
                 self.data.ctrl[grip_idx] = (action[grip_idx] + 1) / 2 * 0.8
 
         for _ in range(5):
@@ -211,7 +252,7 @@ class URDualArmEnv(gym.Env):
             ee       = self.data.site_xpos[self._ee_sites[i]]
             obj      = self.data.xpos[self._obj_ids[i]]
             drop     = self._drop_positions[i]
-            grip_q   = self.data.qpos[i * self._n_per + self._n_arm]
+            grip_q   = self.data.qpos[self._grip_qpos_adr[i]]
 
             dist_ee_obj  = float(np.linalg.norm(ee - obj))
             dist_obj_drop = float(np.linalg.norm(obj[:2] - drop[:2]))

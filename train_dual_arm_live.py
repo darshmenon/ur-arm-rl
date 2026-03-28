@@ -55,11 +55,15 @@ model = SAC(
     verbose=1,
     tensorboard_log=LOG_DIR,
     learning_rate=3e-4,
-    buffer_size=300_000,
-    batch_size=256,
+    buffer_size=500_000,
+    batch_size=512,
     gamma=0.99,
     tau=0.005,
     ent_coef="auto",
+    target_entropy=-14,       # half of action dim — keeps exploration alive longer
+    learning_starts=5_000,    # fill buffer with random experience first
+    train_freq=4,
+    gradient_steps=4,
 )
 
 print("Starting SAC training with live viewer...")
