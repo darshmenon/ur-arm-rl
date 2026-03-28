@@ -62,24 +62,35 @@ class URDualArmEnv(gym.Env):
             frame = mount.add_frame()
             frame.attach_body(arm_spec.worldbody.first_body(), f"{arm_name}_", "")
 
-        attach_arm(spec, "left",  [-0.7, 0.0, 0.0],  0.0)
-        attach_arm(spec, "right", [ 0.7, 0.0, 0.0], 180.0)
+        attach_arm(spec, "left1",  [-0.9, -0.5, 0.0],  0.0)
+        attach_arm(spec, "left2",  [-0.9,  0.5, 0.0],  0.0)
+        attach_arm(spec, "right1", [ 0.9, -0.5, 0.0], 180.0)
+        attach_arm(spec, "right2", [ 0.9,  0.5, 0.0], 180.0)
 
-        # Table between the arms
+        # Large central table between all 4 arms
         table = spec.worldbody.add_body()
         table.name = "table"
         table.pos = [0.0, 0.0, 0.0]
         tg = table.add_geom()
         tg.name = "table_geom"
         tg.type = mujoco.mjtGeom.mjGEOM_BOX
-        tg.size = [0.4, 0.3, 0.02]
+        tg.size = [0.6, 0.8, 0.02]
         tg.rgba = [0.8, 0.6, 0.4, 1]
 
-        # Multiple items to pick (red, blue, green boxes)
+        # Items near each arm base (2 per arm = 8 total)
         items = [
-            ("object0", [-0.2, -0.1, 0.045], [0.9, 0.1, 0.1, 1]),
-            ("object1", [-0.2,  0.0, 0.045], [0.1, 0.1, 0.9, 1]),
-            ("object2", [-0.2,  0.1, 0.045], [0.1, 0.8, 0.1, 1]),
+            # left1 items
+            ("object_l1a", [-0.5, -0.5, 0.045], [0.9, 0.1, 0.1, 1]),
+            ("object_l1b", [-0.4, -0.6, 0.045], [0.9, 0.5, 0.1, 1]),
+            # left2 items
+            ("object_l2a", [-0.5,  0.5, 0.045], [0.1, 0.1, 0.9, 1]),
+            ("object_l2b", [-0.4,  0.6, 0.045], [0.5, 0.1, 0.9, 1]),
+            # right1 items
+            ("object_r1a", [ 0.5, -0.5, 0.045], [0.1, 0.8, 0.1, 1]),
+            ("object_r1b", [ 0.4, -0.6, 0.045], [0.1, 0.8, 0.5, 1]),
+            # right2 items
+            ("object_r2a", [ 0.5,  0.5, 0.045], [0.8, 0.8, 0.1, 1]),
+            ("object_r2b", [ 0.4,  0.6, 0.045], [0.8, 0.4, 0.1, 1]),
         ]
         for name, pos, color in items:
             obj = spec.worldbody.add_body()
@@ -95,31 +106,32 @@ class URDualArmEnv(gym.Env):
             og.mass = 0.1
             og.friction = [1.5, 0.005, 0.0001]
 
-        # Primary handover object (orange sphere)
+        # Central handover object (orange box — no rolling)
         obj = spec.worldbody.add_body()
         obj.name = "object"
-        obj.pos = [-0.25, 0.0, 0.07]
+        obj.pos = [0.0, 0.0, 0.045]
         fj = obj.add_freejoint()
         fj.name = "object_joint"
         og = obj.add_geom()
         og.name = "object_geom"
-        og.type = mujoco.mjtGeom.mjGEOM_SPHERE
-        og.size = [0.03, 0, 0]
+        og.type = mujoco.mjtGeom.mjGEOM_BOX
+        og.size = [0.03, 0.03, 0.03]
         og.rgba = [1.0, 0.5, 0.0, 1]
         og.mass = 0.1
-        og.friction = [1.5, 0.005, 0.0001]
+        og.friction = [2.0, 0.01, 0.001]
 
-        # Drop zone (right side)
-        dz = spec.worldbody.add_body()
-        dz.name = "drop_zone"
-        dz.pos = [0.3, 0.0, 0.02]
-        dzg = dz.add_geom()
-        dzg.name = "drop_zone_geom"
-        dzg.type = mujoco.mjtGeom.mjGEOM_CYLINDER
-        dzg.size = [0.05, 0.002, 0]
-        dzg.rgba = [0.1, 0.9, 0.1, 0.4]
-        dzg.contype = 0
-        dzg.conaffinity = 0
+        # Drop zones for each right arm
+        for dname, dpos in [("drop1", [0.3, -0.3, 0.022]), ("drop2", [0.3, 0.3, 0.022])]:
+            dz = spec.worldbody.add_body()
+            dz.name = dname
+            dz.pos = dpos
+            dzg = dz.add_geom()
+            dzg.name = f"{dname}_geom"
+            dzg.type = mujoco.mjtGeom.mjGEOM_CYLINDER
+            dzg.size = [0.05, 0.002, 0]
+            dzg.rgba = [0.1, 0.9, 0.1, 0.4]
+            dzg.contype = 0
+            dzg.conaffinity = 0
 
         self.model = spec.compile()
         self.data = mujoco.MjData(self.model)
@@ -127,69 +139,65 @@ class URDualArmEnv(gym.Env):
         self._n_arm = 6
         self._n_grip = 1
         self._n_per_arm = self._n_arm + self._n_grip
-        self._n_ctrl = self._n_per_arm * 2  # both arms
+        self._n_arms = 4
+        self._n_ctrl = self._n_per_arm * self._n_arms
 
-        self._left_ee = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "left_attachment_site")
-        self._right_ee = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, "right_attachment_site")
+        self._ee_sites = [
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, f"{n}_attachment_site")
+            for n in ["left1", "left2", "right1", "right2"]
+        ]
         self._obj_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "object")
-        self._drop_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "drop_zone")
-        self._drop_pos = np.array([0.3, 0.0, 0.02])
+        self._drop_pos = np.array([0.3, 0.0, 0.022])
 
-        # obs: left_qpos(6)+qvel(6) + right_qpos(6)+qvel(6) + left_ee(3) + right_ee(3) + obj(3) + drop(3) + grippers(2)
-        obs_dim = 6+6 + 6+6 + 3+3+3+3 + 2
+        # obs: 4x(qpos6+qvel6) + 4x ee_pos(3) + obj(3) + drop(3) + grippers(4)
+        obs_dim = self._n_arms * 12 + self._n_arms * 3 + 3 + 3 + self._n_arms
         self.observation_space = spaces.Box(-np.inf, np.inf, shape=(obs_dim,), dtype=np.float32)
         self.action_space = spaces.Box(-1.0, 1.0, shape=(self._n_ctrl,), dtype=np.float32)
 
         self._viewer = None
 
     def _get_obs(self):
-        lq = self.data.qpos[:self._n_arm].astype(np.float32)
-        lv = self.data.qvel[:self._n_arm].astype(np.float32)
-        rq = self.data.qpos[self._n_per_arm:self._n_per_arm + self._n_arm].astype(np.float32)
-        rv = self.data.qvel[self._n_per_arm:self._n_per_arm + self._n_arm].astype(np.float32)
-        lee = self.data.site_xpos[self._left_ee].astype(np.float32)
-        ree = self.data.site_xpos[self._right_ee].astype(np.float32)
-        obj = self.data.xpos[self._obj_id].astype(np.float32)
-        drop = self._drop_pos.astype(np.float32)
+        parts = []
+        for i in range(self._n_arms):
+            s = i * self._n_per_arm
+            parts.append(self.data.qpos[s:s+self._n_arm].astype(np.float32))
+            parts.append(self.data.qvel[s:s+self._n_arm].astype(np.float32))
+        for site_id in self._ee_sites:
+            parts.append(self.data.site_xpos[site_id].astype(np.float32))
+        parts.append(self.data.xpos[self._obj_id].astype(np.float32))
+        parts.append(self._drop_pos.astype(np.float32))
         grips = np.array([
-            self.data.qpos[self._n_arm],
-            self.data.qpos[self._n_per_arm + self._n_arm],
+            self.data.qpos[i * self._n_per_arm + self._n_arm] for i in range(self._n_arms)
         ], dtype=np.float32)
-        return np.concatenate([lq, lv, rq, rv, lee, ree, obj, drop, grips])
+        parts.append(grips)
+        return np.concatenate(parts)
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         mujoco.mj_resetData(self.model, self.data)
-        # Place object near left arm ee
-        obj_start = self._n_per_arm * 2
-        self.data.qpos[obj_start:obj_start+3] = [-0.3, 0.0, 0.3]
+        obj_start = self._n_per_arm * self._n_arms
+        self.data.qpos[obj_start:obj_start+3] = [0.0, 0.0, 0.045]
         self.data.qpos[obj_start+3:obj_start+7] = [1, 0, 0, 0]
         mujoco.mj_forward(self.model, self.data)
         return self._get_obs(), {}
 
     def step(self, action):
-        left_arm  = action[:self._n_arm] * 0.5
-        left_grip = (action[self._n_arm] + 1) / 2 * 0.8
-        right_arm  = action[self._n_per_arm:self._n_per_arm + self._n_arm] * 0.5
-        right_grip = (action[self._n_per_arm + self._n_arm] + 1) / 2 * 0.8
-
-        self.data.ctrl[:self._n_arm] = left_arm
-        self.data.ctrl[self._n_arm] = left_grip
-        self.data.ctrl[self._n_per_arm:self._n_per_arm + self._n_arm] = right_arm
-        self.data.ctrl[self._n_per_arm + self._n_arm] = right_grip
+        for i in range(self._n_arms):
+            s = i * self._n_per_arm
+            self.data.ctrl[s:s+self._n_arm] = action[s:s+self._n_arm] * 0.5
+            grip_idx = s + self._n_arm
+            if grip_idx < self.model.nu:
+                self.data.ctrl[grip_idx] = (action[grip_idx] + 1) / 2 * 0.8
 
         for _ in range(5):
             mujoco.mj_step(self.model, self.data)
 
         obj_pos = self.data.xpos[self._obj_id]
-        lee = self.data.site_xpos[self._left_ee]
-        ree = self.data.site_xpos[self._right_ee]
-
-        dist_l_obj = np.linalg.norm(lee - obj_pos)
-        dist_r_obj = np.linalg.norm(ree - obj_pos)
+        ee_positions = [self.data.site_xpos[sid] for sid in self._ee_sites]
+        dist_ee_obj = min(np.linalg.norm(ee - obj_pos) for ee in ee_positions)
         dist_obj_drop = np.linalg.norm(obj_pos[:2] - self._drop_pos[:2])
 
-        reward = -0.5 * dist_l_obj - 0.5 * dist_r_obj - 1.0 * dist_obj_drop
+        reward = -0.5 * dist_ee_obj - 1.0 * dist_obj_drop
         if dist_obj_drop < 0.06 and obj_pos[2] < 0.06:
             reward += 20.0
 
@@ -200,8 +208,7 @@ class URDualArmEnv(gym.Env):
             self.render()
 
         return self._get_obs(), reward, terminated, truncated, {
-            "dist_l_obj": dist_l_obj,
-            "dist_r_obj": dist_r_obj,
+            "dist_ee_obj": dist_ee_obj,
             "dist_obj_drop": dist_obj_drop,
         }
 

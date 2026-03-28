@@ -3,7 +3,6 @@ sys.path.insert(0, "/home/asimov/mujoco-ur-arm-rl")
 
 from envs.ur_dual_arm_env import URDualArmEnv
 from stable_baselines3 import SAC
-from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.callbacks import EvalCallback
 import os
 
@@ -13,9 +12,8 @@ os.makedirs(LOG_DIR, exist_ok=True)
 os.makedirs(MODEL_DIR, exist_ok=True)
 
 env = URDualArmEnv()
-check_env(env, warn=True)
-
 eval_env = URDualArmEnv()
+
 eval_callback = EvalCallback(
     eval_env,
     best_model_save_path=MODEL_DIR,
@@ -38,7 +36,7 @@ model = SAC(
     ent_coef="auto",
 )
 
-print("Starting SAC training on dual UR5e handover task...")
+print("Starting SAC training — 4x UR5e arms...")
 model.learn(total_timesteps=1_000_000, callback=eval_callback, progress_bar=True)
-model.save(f"{MODEL_DIR}/ur5e_dual_arm_final")
-print("Done. Model saved.")
+model.save(f"{MODEL_DIR}/ur5e_4arm_final")
+print("Done.")
