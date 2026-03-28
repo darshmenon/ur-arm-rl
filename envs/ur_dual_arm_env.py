@@ -62,13 +62,43 @@ class URDualArmEnv(gym.Env):
             frame = mount.add_frame()
             frame.attach_body(arm_spec.worldbody.first_body(), f"{arm_name}_", "")
 
-        attach_arm(spec, "left",  [-0.35, 0.0, 0.0],  0.0)
-        attach_arm(spec, "right", [ 0.35, 0.0, 0.0], 180.0)
+        attach_arm(spec, "left",  [-0.7, 0.0, 0.0],  0.0)
+        attach_arm(spec, "right", [ 0.7, 0.0, 0.0], 180.0)
 
-        # Object (handover target)
+        # Table between the arms
+        table = spec.worldbody.add_body()
+        table.name = "table"
+        table.pos = [0.0, 0.0, 0.0]
+        tg = table.add_geom()
+        tg.name = "table_geom"
+        tg.type = mujoco.mjtGeom.mjGEOM_BOX
+        tg.size = [0.4, 0.3, 0.02]
+        tg.rgba = [0.8, 0.6, 0.4, 1]
+
+        # Multiple items to pick (red, blue, green boxes)
+        items = [
+            ("object0", [-0.2, -0.1, 0.045], [0.9, 0.1, 0.1, 1]),
+            ("object1", [-0.2,  0.0, 0.045], [0.1, 0.1, 0.9, 1]),
+            ("object2", [-0.2,  0.1, 0.045], [0.1, 0.8, 0.1, 1]),
+        ]
+        for name, pos, color in items:
+            obj = spec.worldbody.add_body()
+            obj.name = name
+            obj.pos = pos
+            fj = obj.add_freejoint()
+            fj.name = f"{name}_joint"
+            og = obj.add_geom()
+            og.name = f"{name}_geom"
+            og.type = mujoco.mjtGeom.mjGEOM_BOX
+            og.size = [0.025, 0.025, 0.025]
+            og.rgba = color
+            og.mass = 0.1
+            og.friction = [1.5, 0.005, 0.0001]
+
+        # Primary handover object (orange sphere)
         obj = spec.worldbody.add_body()
         obj.name = "object"
-        obj.pos = [-0.3, 0.0, 0.3]
+        obj.pos = [-0.25, 0.0, 0.07]
         fj = obj.add_freejoint()
         fj.name = "object_joint"
         og = obj.add_geom()
