@@ -23,7 +23,7 @@ REACH_DELTA_GAIN = 360.0
 GRASP_DELTA_GAIN = 320.0
 LIFT_DELTA_GAIN = 360.0
 CARRY_DELTA_GAIN = 240.0
-ARM_ACTION_SCALE = np.array([1.2, 1.1, 1.2, 1.1, 0.9, 0.9], dtype=np.float64)
+ARM_ACTION_SCALE = np.array([2.0, 1.8, 2.0, 1.8, 1.6, 1.6], dtype=np.float64)
 CURRICULUM_MODES = {"none", "easy_grasp"}
 
 ARM_MODEL_PATH = "/home/asimov/mujoco_menagerie/universal_robots_ur5e/ur5e.xml"
@@ -34,14 +34,14 @@ SIDE_CFG = {
         "base_x": -0.9,
         "table_x": -1.18,
         "drop_x": -1.25,
-        "euler_z": 0.0,
-        "ready_pose": np.array([np.pi, -1.0, 1.5, -1.57, -1.57, 0.0], dtype=np.float64),
+        "euler_z": 180.0,
+        "ready_pose": np.array([0.0, -1.0, 1.5, -1.57, -1.57, 0.0], dtype=np.float64),
     },
     "right": {
         "base_x": 0.9,
-        "table_x": 0.58,
-        "drop_x": 0.68,
-        "euler_z": 180.0,
+        "table_x": 1.18,
+        "drop_x": 1.25,
+        "euler_z": 0.0,
         "ready_pose": np.array([0.0, -1.0, 1.5, -1.57, -1.57, 0.0], dtype=np.float64),
     },
 }
