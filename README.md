@@ -18,6 +18,7 @@ Reinforcement learning training environment for the Universal Robots UR5e arm us
 | `URReachEnv` | Move end-effector to target | 1 |
 | `URPickPlaceEnv` | Pick box and place at target | 1 |
 | `URDualArmEnv` | Symmetric multi-arm pick / lift / place | 4+ even |
+| `SharedArmPickPlaceEnv` | Reusable local policy extracted from symmetric arms | 1 (local view) |
 
 ## Multi-Arm Training
 
