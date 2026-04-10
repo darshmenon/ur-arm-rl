@@ -28,9 +28,9 @@ Four or more UR5e arms with Robotiq 2F-85 grippers arranged symmetrically. Each 
 The current multi-arm reward is contact-gated: the policy is rewarded for approaching the object, but grasp/lift progress only counts once the object actually contacts both gripper sides and starts moving upward.
 
 ```bash
-python3 train_dual_arm_live.py --arms 4 --n-envs 4
+python3 scripts/train/train_dual_arm_live.py --arms 4 --n-envs 4
 
-python3 train_dual_arm_live.py --arms 8 --n-envs 2
+python3 scripts/train/train_dual_arm_live.py --arms 8 --n-envs 2
 ```
 
 ## Setup
@@ -41,23 +41,34 @@ pip install mujoco gymnasium stable-baselines3
 
 Clone [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie) to `/home/asimov/mujoco_menagerie`.
 
+## Project Layout
+
+- `envs/`: MuJoCo Gymnasium environments
+- `scripts/train/`: training entrypoints
+- `mujoco_ur_rl_ros2/`: ROS2 policy node package
+- `launch/`: ROS2 launch files
+- `assets/`: README images and visual references
+
 ## Train
 
 ```bash
 # Single arm reach
-python train.py
+python3 scripts/train/train.py
 
 # Single arm pick-and-place
-python train_pick_place.py
+python3 scripts/train/train_pick_place.py
 
 # Multi-arm training, headless by default
-python3 train_dual_arm_live.py --arms 4 --n-envs 4
+python3 scripts/train/train_dual_arm_live.py --arms 4 --n-envs 4
 
 # Larger symmetric layout
-python3 train_dual_arm_live.py --arms 8 --n-envs 2
+python3 scripts/train/train_dual_arm_live.py --arms 8 --n-envs 2
 
 # Same trainer, but with the MuJoCo viewer
-python3 train_dual_arm_live.py --arms 4 --n-envs 2 --viewer
+python3 scripts/train/train_dual_arm_live.py --arms 4 --n-envs 2 --viewer
+
+# Use GPU when PyTorch CUDA is available
+python3 scripts/train/train_dual_arm_live.py --arms 4 --n-envs 4 --device cuda
 ```
 
 Best models and checkpoints are saved under `models/multi_arm/`, run logs under `logs/multi_arm/`.
@@ -122,5 +133,5 @@ ROS2 files added in this repo:
 ## Visualize
 
 ```bash
-python ur5e_with_gripper.py
+python3 scripts/train/train_dual_arm_live.py --arms 4 --n-envs 1 --viewer
 ```

@@ -3,6 +3,7 @@ import json
 import os
 import sys
 from datetime import datetime
+from pathlib import Path
 
 import mujoco.viewer
 import numpy as np
@@ -11,7 +12,8 @@ from stable_baselines3.common.callbacks import BaseCallback, CallbackList, Check
 from stable_baselines3.common.noise import NormalActionNoise
 from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor
 
-sys.path.insert(0, "/home/asimov/mujoco-ur-arm-rl")
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT))
 
 from envs.ur_dual_arm_env import URDualArmEnv
 
@@ -40,6 +42,18 @@ def parse_args():
         help="Heartbeat frequency in timesteps for latest_status.json.",
     )
     parser.add_argument("--viewer", action="store_true", help="Launch the MuJoCo viewer.")
+    parser.add_argument(
+        "--resume-model",
+        type=str,
+        default=None,
+        help="Optional path to a saved SAC model zip to continue training from.",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="auto",
+        help="Torch device for Stable-Baselines3, e.g. auto, cpu, cuda, or cuda:0.",
+    )
     parser.add_argument(
         "--run-name",
         type=str,
@@ -162,6 +176,9 @@ def callback_freq(target_timesteps, n_envs):
 def main():
     args = parse_args()
 
+    if args.resume_model and not os.path.exists(args.resume_model):
+        raise FileNotFoundError(f"Resume model not found: {args.resume_model}")
+
     os.makedirs(LOG_ROOT, exist_ok=True)
     os.makedirs(MODEL_ROOT, exist_ok=True)
 
@@ -193,24 +210,35 @@ def main():
         sigma=0.1 * np.ones(n_actions, dtype=np.float32),
     )
 
-    model = SAC(
-        "MlpPolicy",
-        vec_env,
-        verbose=1,
-        tensorboard_log=tb_dir,
-        learning_rate=3e-4,
-        buffer_size=500_000,
-        batch_size=512,
-        gamma=0.99,
-        tau=0.005,
-        ent_coef="auto",
-        target_entropy=-6,
-        learning_starts=2_000,
-        train_freq=2,
-        gradient_steps=16,
-        action_noise=action_noise,
-        policy_kwargs=dict(net_arch=[256, 256, 256]),
-    )
+    if args.resume_model:
+        print(f"Resuming training from {args.resume_model}", flush=True)
+        model = SAC.load(
+            args.resume_model,
+            env=vec_env,
+            tensorboard_log=tb_dir,
+            action_noise=action_noise,
+            device=args.device,
+        )
+    else:
+        model = SAC(
+            "MlpPolicy",
+            vec_env,
+            verbose=1,
+            tensorboard_log=tb_dir,
+            learning_rate=3e-4,
+            buffer_size=500_000,
+            batch_size=512,
+            gamma=0.99,
+            tau=0.005,
+            ent_coef="auto",
+            target_entropy=-6,
+            learning_starts=2_000,
+            train_freq=2,
+            gradient_steps=16,
+            action_noise=action_noise,
+            policy_kwargs=dict(net_arch=[256, 256, 256]),
+            device=args.device,
+        )
 
     eval_callback = EvalCallback(
         eval_env,
@@ -245,6 +273,7 @@ def main():
         callback=CallbackList(callbacks),
         progress_bar=False,
         log_interval=10,
+        reset_num_timesteps=not bool(args.resume_model),
     )
 
     final_model_path = os.path.join(model_dir, f"ur5e_{args.arms}arm_final")
