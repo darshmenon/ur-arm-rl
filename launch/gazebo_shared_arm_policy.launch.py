@@ -65,8 +65,7 @@ def generate_launch_description():
         [
             DeclareLaunchArgument(
                 "gazebo_launch_path",
-                default_value="/home/asimov/UR3_ROS2_PICK_AND_PLACE/ur_gazebo/launch/ur.gazebo.launch.py",
-                description="Path to the UR Gazebo launch file to include.",
+                description="Path to the UR Gazebo launch file to include (e.g. /path/to/UR3_ROS2_PICK_AND_PLACE/ur_gazebo/launch/ur.gazebo.launch.py).",
             ),
             DeclareLaunchArgument("world_file", default_value="colored_blocks.world"),
             DeclareLaunchArgument("robot_name", default_value="ur"),
@@ -80,7 +79,8 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "model_path",
-                default_value="/home/asimov/mujoco-ur-arm-rl/models/shared_arm/shared_arm_8arm_all_samples_resume_20260410_1501/best_model.zip",
+                default_value="",
+                description="Absolute path to the SAC model zip. Leave empty to use the node's built-in default.",
             ),
             DeclareLaunchArgument("joint_state_topic", default_value="/joint_states"),
             DeclareLaunchArgument(

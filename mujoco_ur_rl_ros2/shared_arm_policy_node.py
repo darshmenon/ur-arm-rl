@@ -68,7 +68,7 @@ class SharedArmPolicyNode(Node):
         self.declare_parameter("drop_z", 0.02)
         self.declare_parameter("phase", 0.0)
 
-        model_path = str(self.get_parameter("model_path").value)
+        model_path = str(self.get_parameter("model_path").value) or DEFAULT_MODEL_PATH
         self._arm_joint_names = [str(name) for name in self.get_parameter("arm_joint_names").value]
         self._gripper_joint_names = [str(name) for name in self.get_parameter("gripper_joint_names").value]
         self._action_scale = float(self.get_parameter("action_scale").value)

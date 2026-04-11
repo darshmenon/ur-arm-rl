@@ -146,7 +146,7 @@ Run the shared-arm policy node directly:
 
 ```bash
 ros2 run mujoco_ur_rl_ros2 shared_arm_policy_node --ros-args \
-  -p model_path:=/home/asimov/mujoco-ur-arm-rl/models/shared_arm/shared_arm_8arm_all_samples_resume_20260410_1501/best_model.zip \
+  -p model_path:=/path/to/mujoco-ur-arm-rl/models/shared_arm/<run_name>/best_model.zip \
   -p arm_trajectory_topic:=/scaled_joint_trajectory_controller/joint_trajectory \
   -p gripper_trajectory_topic:=/gripper_controller/joint_trajectory \
   -p ee_x:=0.0 -p ee_y:=0.0 -p ee_z:=0.0 \
@@ -158,8 +158,8 @@ Launch Gazebo plus the shared policy:
 
 ```bash
 ros2 launch mujoco_ur_rl_ros2 gazebo_shared_arm_policy.launch.py \
-  gazebo_launch_path:=/home/asimov/UR3_ROS2_PICK_AND_PLACE/ur_gazebo/launch/ur.gazebo.launch.py \
-  model_path:=/home/asimov/mujoco-ur-arm-rl/models/shared_arm/shared_arm_8arm_all_samples_resume_20260410_1501/best_model.zip \
+  gazebo_launch_path:=/path/to/UR3_ROS2_PICK_AND_PLACE/ur_gazebo/launch/ur.gazebo.launch.py \
+  model_path:=/path/to/mujoco-ur-arm-rl/models/shared_arm/<run_name>/best_model.zip \
   arm_trajectory_topic:=/scaled_joint_trajectory_controller/joint_trajectory \
   gripper_trajectory_topic:=/gripper_controller/joint_trajectory \
   ee_x:=0.0 ee_y:=0.0 ee_z:=0.0 \
