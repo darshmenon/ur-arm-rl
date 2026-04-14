@@ -20,7 +20,7 @@ def parse_args():
     parser.add_argument("--episodes", type=int, default=3)
     parser.add_argument("--deterministic", action="store_true")
     parser.add_argument("--device", type=str, default="auto")
-    parser.add_argument("--curriculum", choices=["none", "easy_grasp"], default="easy_grasp")
+    parser.add_argument("--curriculum", choices=["none", "easy_grasp", "grasp_focus"], default="easy_grasp")
     parser.add_argument("--viewer", action="store_true", help="Show MuJoCo viewer.")
     parser.add_argument("--max-steps", type=int, default=None, help="Optional cap per episode.")
     parser.add_argument("--sleep", type=float, default=0.0, help="Optional delay per env step.")

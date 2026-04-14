@@ -43,7 +43,14 @@ def parse_args():
     parser.add_argument("--checkpoint-freq", type=int, default=50_000, help="Checkpoint frequency in timesteps.")
     parser.add_argument("--status-freq", type=int, default=500, help="Heartbeat frequency for latest_status.json.")
     parser.add_argument("--device", type=str, default="auto", help="Torch device: auto, cpu, cuda, or cuda:0.")
-    parser.add_argument("--curriculum", choices=["none", "easy_grasp"], default="easy_grasp")
+    parser.add_argument("--curriculum", choices=["none", "easy_grasp", "grasp_focus"], default="easy_grasp")
+    parser.add_argument("--action-noise-sigma", type=float, default=0.10, help="Stddev for SAC action noise.")
+    parser.add_argument(
+        "--target-entropy",
+        type=float,
+        default=-3.0,
+        help="SAC target entropy. Less negative means more exploitation.",
+    )
     parser.add_argument("--resume-model", type=str, default=None, help="Optional shared-arm SAC model zip to resume.")
     parser.add_argument("--run-name", type=str, default=None)
     parser.add_argument("--viewer", action="store_true", help="Launch the MuJoCo passive viewer on the first scene.")
@@ -82,6 +89,30 @@ def json_safe(value):
     if isinstance(value, np.generic):
         return value.item()
     return value
+
+
+def diagnostic_summary(env_info):
+    if not env_info:
+        return None
+    summary = env_info.get("scene_summary")
+    if not isinstance(summary, dict):
+        return None
+    return {
+        "max_phase": summary.get("max_phase"),
+        "phase_counts": summary.get("phase_counts"),
+        "carrying_count": summary.get("carrying_count"),
+        "any_contact_count": summary.get("any_contact_count"),
+        "both_contacts_count": summary.get("both_contacts_count"),
+        "object_reset_count": summary.get("object_reset_count"),
+        "done_count": summary.get("done_count"),
+        "mean_arm_reward": summary.get("mean_arm_reward"),
+        "mean_ee_to_obj": summary.get("mean_ee_to_obj"),
+        "min_ee_to_obj": summary.get("min_ee_to_obj"),
+        "mean_obj_height": summary.get("mean_obj_height"),
+        "max_obj_height": summary.get("max_obj_height"),
+        "mean_obj_to_drop": summary.get("mean_obj_to_drop"),
+        "min_obj_to_drop": summary.get("min_obj_to_drop"),
+    }
 
 
 class ViewerCallback(BaseCallback):
@@ -134,14 +165,22 @@ class StatusCallback(BaseCallback):
             "ent_coef_loss": safe_metric(values, "train/ent_coef_loss"),
             "eval_mean_reward": eval_mean_reward,
             "eval_mean_ep_length": safe_metric(values, "eval/mean_ep_length"),
+            "diagnostics": diagnostic_summary(self._latest_info),
             "env0_info": self._latest_info,
         }
         with open(self._status_path, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2, sort_keys=True)
+        diagnostics = payload["diagnostics"] or {}
+        phase_counts = diagnostics.get("phase_counts")
         print(
             f"[status] steps={payload['timesteps']}"
             f" ep_rew_mean={payload['ep_rew_mean']}"
-            f" eval_mean_reward={payload['eval_mean_reward']}",
+            f" eval_mean_reward={payload['eval_mean_reward']}"
+            f" max_phase={diagnostics.get('max_phase')}"
+            f" contacts={diagnostics.get('both_contacts_count')}"
+            f" carrying={diagnostics.get('carrying_count')}"
+            f" resets={diagnostics.get('object_reset_count')}"
+            f" phase_counts={phase_counts}",
             flush=True,
         )
 
@@ -200,7 +239,7 @@ def main():
     n_actions = vec_env.action_space.shape[0]
     action_noise = NormalActionNoise(
         mean=np.zeros(n_actions, dtype=np.float32),
-        sigma=0.1 * np.ones(n_actions, dtype=np.float32),
+        sigma=args.action_noise_sigma * np.ones(n_actions, dtype=np.float32),
     )
 
     if args.resume_model:
@@ -212,6 +251,8 @@ def main():
             action_noise=action_noise,
             device=args.device,
         )
+        model.action_noise = action_noise
+        model.target_entropy = args.target_entropy
     else:
         model = SAC(
             "MlpPolicy",
@@ -224,7 +265,7 @@ def main():
             gamma=0.99,
             tau=0.005,
             ent_coef="auto",
-            target_entropy=-3,
+            target_entropy=args.target_entropy,
             learning_starts=2_000,
             train_freq=2,
             gradient_steps=8,
