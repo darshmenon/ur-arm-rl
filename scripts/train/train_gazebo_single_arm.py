@@ -94,9 +94,9 @@ def main():
             tau=0.005,
             ent_coef="auto",
             target_entropy=-14.0,  # full action dim keeps exploration alive longer
-            learning_starts=10_000,
+            learning_starts=50_000,  # fill buffer with random exploration before training
             train_freq=4,
-            gradient_steps=4,
+            gradient_steps=2,  # fewer updates per step to slow entropy collapse
             policy_kwargs={"net_arch": [256, 256, 256]},
         )
 
