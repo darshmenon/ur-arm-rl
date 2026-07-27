@@ -85,6 +85,8 @@ class URPickPlaceEnv(gym.Env):
 
         self._viewer = None
         self._phase = "reach"  # reach -> grasp -> lift -> place
+        self._lift_height = 0.08  # obj must clear this to count as "picked up"
+        self._has_lifted = False
 
     def _get_ee_pos(self):
         return self.data.site_xpos[self._ee_site_id].copy()
@@ -106,6 +108,7 @@ class URPickPlaceEnv(gym.Env):
         super().reset(seed=seed)
         mujoco.mj_resetData(self.model, self.data)
         self._phase = "reach"
+        self._has_lifted = False
 
         # Randomize object position on table
         ox = self.np_random.uniform(0.35, 0.55)
@@ -144,16 +147,22 @@ class URPickPlaceEnv(gym.Env):
         dist_obj_target = np.linalg.norm(obj_pos[:2] - self._target_pos[:2])
         obj_height = obj_pos[2]
 
+        if obj_height > self._lift_height and not self._has_lifted:
+            self._has_lifted = True
+
         # Shaped reward
         reward = 0.0
         reward -= 0.5 * dist_ee_obj          # reach object
         reward -= 1.0 * dist_obj_target      # move object to target
         reward += 0.5 * max(0, obj_height - 0.05)  # lift bonus
+        if self._has_lifted:
+            reward += 1.0  # keep rewarding once the object has actually been picked up
 
-        if dist_obj_target < 0.05 and obj_height < 0.05:
-            reward += 10.0  # placed!
+        placed = self._has_lifted and dist_obj_target < 0.05 and obj_height < 0.05
+        if placed:
+            reward += 10.0  # picked up and placed!
 
-        terminated = bool(dist_obj_target < 0.04 and obj_height < 0.05)
+        terminated = bool(self._has_lifted and dist_obj_target < 0.04 and obj_height < 0.05)
         truncated = bool(self.data.time > 15.0)
 
         if self.render_mode == "human":
@@ -163,6 +172,8 @@ class URPickPlaceEnv(gym.Env):
             "dist_ee_obj": dist_ee_obj,
             "dist_obj_target": dist_obj_target,
             "obj_height": obj_height,
+            "has_lifted": self._has_lifted,
+            "is_success": terminated,
         }
 
     def render(self):

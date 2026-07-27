@@ -4,6 +4,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
+from torch_compat import block_real_tensorflow, patch_torch_dynamo_for_optimizer
+
+block_real_tensorflow()
+patch_torch_dynamo_for_optimizer()
+
 from envs.ur_reach_env import URReachEnv
 from stable_baselines3 import SAC
 from stable_baselines3.common.env_checker import check_env
