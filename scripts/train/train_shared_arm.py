@@ -152,8 +152,6 @@ class StatusCallback(BaseCallback):
         self._eval_callback = eval_callback
         self._latest_info = None
         self._metric_cache = {}
-        self._train_start_time = None
-        self._train_start_timesteps = 0
 
     def _refresh_metric_cache(self):
         # SB3's Logger clears name_to_value right after each of its own dumps, so
@@ -182,19 +180,21 @@ class StatusCallback(BaseCallback):
         return ep_rew_mean, ep_len_mean
 
     def _fps(self):
-        if self._train_start_time is None:
+        start_time = getattr(self.model, "start_time", None)
+        if not start_time:
             return None
-        elapsed = time.time() - self._train_start_time
+        elapsed = (time.time_ns() - start_time) / 1e9
         if elapsed <= 0:
             return None
-        return (int(self.model.num_timesteps) - self._train_start_timesteps) / elapsed
+        start_timesteps = getattr(self.model, "_num_timesteps_at_start", 0)
+        return (int(self.model.num_timesteps) - start_timesteps) / elapsed
 
     def _eval_mean_ep_length(self):
         eval_mean_ep_length = self._cached_metric("eval/mean_ep_length")
         if eval_mean_ep_length is not None:
             return eval_mean_ep_length
         lengths = getattr(self._eval_callback, "evaluations_length", None) if self._eval_callback else None
-        if lengths:
+        if lengths and lengths[-1]:
             return float(np.mean(lengths[-1]))
         return None
 
@@ -239,19 +239,18 @@ class StatusCallback(BaseCallback):
         )
 
     def _on_training_start(self):
-        self._train_start_time = time.time()
-        self._train_start_timesteps = int(self.model.num_timesteps)
         self._dump_status()
         self._last_dump_step = int(self.model.num_timesteps)
 
     def _on_step(self):
-        self._refresh_metric_cache()
         infos = self.locals.get("infos")
         if infos:
             self._latest_info = json_safe(dict(infos[0]))
         if self.model.num_timesteps - self._last_dump_step >= self._status_freq:
             self._dump_status()
             self._last_dump_step = int(self.model.num_timesteps)
+        else:
+            self._refresh_metric_cache()
         return True
 
     def _on_training_end(self):
