@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -152,27 +153,75 @@ class StatusCallback(BaseCallback):
         self._last_dump_step = -1
         self._eval_callback = eval_callback
         self._latest_env_info = None
+        self._metric_cache = {}
+        self._train_start_time = None
+        self._train_start_timesteps = 0
+
+    def _refresh_metric_cache(self):
+        # SB3's Logger clears name_to_value right after each of its own dumps, so
+        # most polls of it land in an empty window. Snapshot on every step instead
+        # of only at our own status_freq cadence, and keep the last known value.
+        # (rollout/ep_rew_mean, rollout/ep_len_mean, time/fps, time/episodes are
+        # recorded and dumped atomically inside SAC.dump_logs() with no callback
+        # in between, so they never land here at all -- those are read from
+        # persistent model state directly in _dump_status instead.)
+        values = getattr(self.logger, "name_to_value", {})
+        for key, value in values.items():
+            if value is not None:
+                self._metric_cache[key] = value
+
+    def _cached_metric(self, key):
+        return safe_metric(self._metric_cache, key)
+
+    def _rollout_stats(self):
+        buffer = getattr(self.model, "ep_info_buffer", None)
+        if not buffer:
+            return None, None
+        rewards = [ep["r"] for ep in buffer if "r" in ep]
+        lengths = [ep["l"] for ep in buffer if "l" in ep]
+        ep_rew_mean = float(np.mean(rewards)) if rewards else None
+        ep_len_mean = float(np.mean(lengths)) if lengths else None
+        return ep_rew_mean, ep_len_mean
+
+    def _fps(self):
+        if self._train_start_time is None:
+            return None
+        elapsed = time.time() - self._train_start_time
+        if elapsed <= 0:
+            return None
+        return (int(self.model.num_timesteps) - self._train_start_timesteps) / elapsed
+
+    def _eval_mean_ep_length(self):
+        eval_mean_ep_length = self._cached_metric("eval/mean_ep_length")
+        if eval_mean_ep_length is not None:
+            return eval_mean_ep_length
+        lengths = getattr(self._eval_callback, "evaluations_length", None) if self._eval_callback else None
+        if lengths:
+            return float(np.mean(lengths[-1]))
+        return None
 
     def _dump_status(self):
-        values = getattr(self.logger, "name_to_value", {})
-        eval_mean_reward = safe_metric(values, "eval/mean_reward")
+        self._refresh_metric_cache()
+        eval_mean_reward = self._cached_metric("eval/mean_reward")
         if eval_mean_reward is None and self._eval_callback is not None:
             if np.isfinite(self._eval_callback.last_mean_reward):
                 eval_mean_reward = float(self._eval_callback.last_mean_reward)
 
+        ep_rew_mean, ep_len_mean = self._rollout_stats()
+
         payload = {
             "timestamp": datetime.now().isoformat(timespec="seconds"),
             "timesteps": int(self.model.num_timesteps),
-            "fps": safe_metric(values, "time/fps"),
-            "episodes": safe_metric(values, "time/episodes"),
-            "ep_rew_mean": safe_metric(values, "rollout/ep_rew_mean"),
-            "ep_len_mean": safe_metric(values, "rollout/ep_len_mean"),
-            "actor_loss": safe_metric(values, "train/actor_loss"),
-            "critic_loss": safe_metric(values, "train/critic_loss"),
-            "ent_coef": safe_metric(values, "train/ent_coef"),
-            "ent_coef_loss": safe_metric(values, "train/ent_coef_loss"),
+            "fps": self._fps(),
+            "episodes": int(getattr(self.model, "_episode_num", 0)),
+            "ep_rew_mean": ep_rew_mean,
+            "ep_len_mean": ep_len_mean,
+            "actor_loss": self._cached_metric("train/actor_loss"),
+            "critic_loss": self._cached_metric("train/critic_loss"),
+            "ent_coef": self._cached_metric("train/ent_coef"),
+            "ent_coef_loss": self._cached_metric("train/ent_coef_loss"),
             "eval_mean_reward": eval_mean_reward,
-            "eval_mean_ep_length": safe_metric(values, "eval/mean_ep_length"),
+            "eval_mean_ep_length": self._eval_mean_ep_length(),
             "env0_info": self._latest_env_info,
         }
 
@@ -188,10 +237,13 @@ class StatusCallback(BaseCallback):
         print(status_line, flush=True)
 
     def _on_training_start(self):
+        self._train_start_time = time.time()
+        self._train_start_timesteps = int(self.model.num_timesteps)
         self._dump_status()
         self._last_dump_step = int(self.model.num_timesteps)
 
     def _on_step(self):
+        self._refresh_metric_cache()
         infos = self.locals.get("infos")
         if infos:
             self._latest_env_info = json_safe(dict(infos[0]))
