@@ -21,7 +21,7 @@ from stable_baselines3.common.callbacks import BaseCallback, CallbackList, Check
 from stable_baselines3.common.noise import NormalActionNoise
 from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor
 
-from envs.ur_dual_arm_env import URDualArmEnv
+from envs.ur_dual_arm_env import CurriculumState, URDualArmEnv
 
 
 LOG_ROOT = "logs/multi_arm"
@@ -48,11 +48,31 @@ def parse_args():
         help="Heartbeat frequency in timesteps for latest_status.json.",
     )
     parser.add_argument("--viewer", action="store_true", help="Launch the MuJoCo viewer.")
+    parser.add_argument("--record-gif", type=str, default=None, help="Write a training GIF to this path (offscreen render).")
+    parser.add_argument("--gif-every", type=int, default=10, help="Capture a GIF frame every N training steps.")
     parser.add_argument(
         "--resume-model",
         type=str,
         default=None,
         help="Optional path to a saved SAC model zip to continue training from.",
+    )
+    parser.add_argument(
+        "--resume-buffer",
+        type=str,
+        default=None,
+        help="Replay buffer pickle saved by a previous run (<final model>_replay_buffer.pkl).",
+    )
+    parser.add_argument(
+        "--target-entropy",
+        type=float,
+        default=None,
+        help="SAC target entropy. Default: -(number of action dims), the standard SAC choice.",
+    )
+    parser.add_argument(
+        "--resume-warmup",
+        type=int,
+        default=5_000,
+        help="When resuming without a replay buffer, collect this many steps before gradient updates restart.",
     )
     parser.add_argument(
         "--device",
@@ -85,13 +105,16 @@ def parse_args():
     return parser.parse_args()
 
 
-def make_env(arm_count, curriculum_mode, domain_rand=False, handover_mode=False):
+def make_env(arm_count, curriculum_mode, domain_rand=False, handover_mode=False,
+             curriculum_state=None, curriculum_update=True):
     def _init():
         return URDualArmEnv(
             arm_count=arm_count,
             curriculum_mode=curriculum_mode,
             domain_rand=domain_rand,
             handover_mode=handover_mode,
+            curriculum_state=curriculum_state,
+            curriculum_update=curriculum_update,
         )
 
     return _init
@@ -104,10 +127,10 @@ def unwrap_first_env(vec_env):
     return current.envs[0]
 
 
-def safe_metric(values, key):
+def safe_metric(values, key, default=None):
     value = values.get(key)
     if value is None:
-        return None
+        return default
     return float(value)
 
 
@@ -142,6 +165,71 @@ class LiveViewerCallback(BaseCallback):
         if self._viewer is not None:
             self._viewer.close()
             self._viewer = None
+
+
+class GifRecorderCallback(BaseCallback):
+    """Capture offscreen frames of env 0 and write a GIF (rewritten every save_every frames and at the end)."""
+
+    def __init__(self, path, every=10, width=640, height=480, max_frames=600, save_every=100):
+        super().__init__()
+        self._path, self._every = path, max(1, every)
+        self._w, self._h = width, height
+        self._max, self._save_every = max_frames, save_every
+        self._frames, self._renderer, self._cam = [], None, None
+
+    def _on_training_start(self):
+        env0 = unwrap_first_env(self.training_env)
+        self._env0 = env0
+        self._renderer = mujoco.Renderer(env0.model, self._h, self._w)
+        self._cam = mujoco.MjvCamera()
+        mujoco.mjv_defaultFreeCamera(env0.model, self._cam)
+        self._cam.lookat[:] = [0.0, 0.0, 0.3]
+        self._cam.distance, self._cam.elevation, self._cam.azimuth = 4.5, -50, 90
+
+    def _on_step(self):
+        if self.n_calls % self._every == 0 and len(self._frames) < self._max:
+            self._renderer.update_scene(self._env0.data, camera=self._cam)
+            self._frames.append(self._renderer.render().copy())
+            if len(self._frames) % self._save_every == 0:
+                self._write()
+        return True
+
+    def _write(self):
+        if self._frames:
+            import imageio
+            os.makedirs(os.path.dirname(os.path.abspath(self._path)), exist_ok=True)
+            imageio.mimsave(self._path, self._frames, duration=0.06, loop=0)
+
+    def _on_training_end(self):
+        self._write()
+        if self._renderer is not None:
+            self._renderer.close()
+            self._renderer = None
+
+
+class WarmupCallback(BaseCallback):
+    """Pause gradient updates for the first N steps after a resume with an empty replay buffer."""
+
+    def __init__(self, steps):
+        super().__init__()
+        self._steps = steps
+        self._saved = None
+        self._end = None
+
+    def _on_training_start(self):
+        self._saved = self.model.gradient_steps
+        self._end = self.model.num_timesteps + self._steps
+        self.model.gradient_steps = 0
+
+    def _on_step(self):
+        if self._end is not None and self.model.num_timesteps >= self._end:
+            self.model.gradient_steps = self._saved
+            self._end = None
+        return True
+
+    def _on_training_end(self):
+        if self._end is not None:
+            self.model.gradient_steps = self._saved
 
 
 class StatusCallback(BaseCallback):
@@ -294,13 +382,19 @@ def main():
     with open(os.path.join(LOG_ROOT, "latest_run.txt"), "w", encoding="utf-8") as handle:
         handle.write(f"{run_dir}\n")
 
+    # one curriculum state shared by every env; eval envs read it but never advance it
+    cur_state = CurriculumState()
     vec_env = DummyVecEnv([
-        make_env(args.arms, args.curriculum, args.domain_rand, args.handover)
+        make_env(args.arms, args.curriculum, args.domain_rand, args.handover, cur_state, True)
         for _ in range(args.n_envs)
     ])
-    vec_env = VecMonitor(vec_env, filename=os.path.join(run_dir, "train_monitor.csv"))
-    eval_env = DummyVecEnv([make_env(args.arms, args.curriculum, args.domain_rand, args.handover)])
-    eval_env = VecMonitor(eval_env, filename=os.path.join(run_dir, "eval_monitor.csv"))
+    vec_env = VecMonitor(vec_env, filename=os.path.join(run_dir, "train_monitor.csv"),
+                         info_keywords=("done_fraction",))
+    eval_env = DummyVecEnv([
+        make_env(args.arms, args.curriculum, args.domain_rand, args.handover, cur_state, False)
+    ])
+    eval_env = VecMonitor(eval_env, filename=os.path.join(run_dir, "eval_monitor.csv"),
+                          info_keywords=("done_fraction",))
 
     n_actions = vec_env.action_space.shape[0]
     action_noise = NormalActionNoise(
@@ -308,6 +402,9 @@ def main():
         sigma=0.1 * np.ones(n_actions, dtype=np.float32),
     )
 
+    target_entropy = args.target_entropy if args.target_entropy is not None else -float(n_actions)
+
+    warmup = None
     if args.resume_model:
         print(f"Resuming training from {args.resume_model}", flush=True)
         model = SAC.load(
@@ -317,6 +414,13 @@ def main():
             action_noise=action_noise,
             device=args.device,
         )
+        model.target_entropy = target_entropy
+        if args.resume_buffer and os.path.exists(args.resume_buffer):
+            model.load_replay_buffer(args.resume_buffer)
+            print(f"Loaded replay buffer ({model.replay_buffer.size()} transitions)", flush=True)
+        else:
+            warmup = WarmupCallback(args.resume_warmup)
+            print(f"No replay buffer: pausing updates for {args.resume_warmup} steps", flush=True)
     else:
         model = SAC(
             "MlpPolicy",
@@ -329,7 +433,7 @@ def main():
             gamma=0.99,
             tau=0.005,
             ent_coef="auto",
-            target_entropy=-6,
+            target_entropy=target_entropy,
             learning_starts=2_000,
             train_freq=2,
             gradient_steps=16,
@@ -357,8 +461,12 @@ def main():
         StatusCallback(run_dir=run_dir, status_freq=args.status_freq, eval_callback=eval_callback),
     ]
 
+    if warmup is not None:
+        callbacks.append(warmup)
     if args.viewer:
         callbacks.append(LiveViewerCallback())
+    if args.record_gif:
+        callbacks.append(GifRecorderCallback(args.record_gif, every=args.gif_every))
 
     print(
         f"Training {args.arms}-arm SAC with {args.n_envs} envs. "
@@ -376,6 +484,7 @@ def main():
 
     final_model_path = os.path.join(model_dir, f"ur5e_{args.arms}arm_final")
     model.save(final_model_path)
+    model.save_replay_buffer(final_model_path + "_replay_buffer.pkl")
     print(f"Training done. Final model saved to {final_model_path}", flush=True)
 
 

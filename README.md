@@ -22,7 +22,9 @@ Reinforcement learning training environment for the Universal Robots UR5e arm us
 
 ## Multi-Arm Training
 
-![4-Arm Training](assets/4arm_training.png)
+![4-Arm Training](assets/4arm_training.gif)
+
+Record your own with `--record-gif assets/4arm_training.gif` (use `MUJOCO_GL=glfw` or `osmesa`; EGL may fail on some drivers).
 
 Four or more UR5e arms with Robotiq 2F-85 grippers arranged symmetrically. Each arm gets its own table, object, and drop zone, and the layout scales to 8 arms in the same pattern.
 
@@ -32,6 +34,12 @@ The reward is contact-gated and phase-based (reach → grasp → lift → place)
 python3 scripts/train/train_dual_arm_live.py --arms 4 --n-envs 4
 python3 scripts/train/train_dual_arm_live.py --arms 8 --n-envs 2
 ```
+
+## UR3 Pick-and-Place (MuJoCo)
+
+![UR3 pick and place](assets/ur3_pick_place_mujoco.gif)
+
+DAgger policy from [UR3_ROS2_PICK_AND_PLACE](https://github.com/darshmenon/UR3_ROS2_PICK_AND_PLACE) (`ur_rl_training/scripts/render_policy.py`), rendered headless in MuJoCo.
 
 ## Features
 

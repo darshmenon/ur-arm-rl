@@ -38,6 +38,14 @@ AUTO_CURRICULUM_INCREASE_THRESH = 0.70
 AUTO_CURRICULUM_DECREASE_THRESH = 0.30
 AUTO_CURRICULUM_STEP = 0.05
 
+
+class CurriculumState:
+    """Auto-curriculum state. Share one instance across envs so training and eval see the same difficulty."""
+
+    def __init__(self):
+        self.difficulty = 0.0
+        self.history: deque = deque(maxlen=AUTO_CURRICULUM_WINDOW)
+
 HANDOVER_X = 0.0
 
 _MENAGERIE       = os.environ.get("MUJOCO_MENAGERIE_PATH", os.path.expanduser("~/mujoco_menagerie"))
@@ -127,6 +135,8 @@ class URDualArmEnv(gym.Env):
         curriculum_mode="none",
         domain_rand=False,
         handover_mode=False,
+        curriculum_state=None,
+        curriculum_update=True,
     ):
         if curriculum_mode not in CURRICULUM_MODES:
             raise ValueError(f"curriculum_mode must be one of {sorted(CURRICULUM_MODES)}")
@@ -347,8 +357,8 @@ class URDualArmEnv(gym.Env):
         self.max_episode_steps = 500 * self._n_arms
 
         # auto-curriculum state (persists across episodes)
-        self._difficulty = 0.0
-        self._success_history: deque = deque(maxlen=AUTO_CURRICULUM_WINDOW)
+        self._cur = curriculum_state if curriculum_state is not None else CurriculumState()
+        self._curriculum_update = curriculum_update
 
     def _to_local(self, world_pos, i):
         return self._arm_rot_inv[i] @ (world_pos - self._arm_base_pos[i])
@@ -372,7 +382,7 @@ class URDualArmEnv(gym.Env):
         if self.curriculum_mode == "auto":
             close_pos = np.array([table_x - 0.24, table_y - 0.13, OBJECT_Z])
             far_pos = np.array([table_x, table_y, OBJECT_Z])
-            spawn = close_pos + self._difficulty * (far_pos - close_pos)
+            spawn = close_pos + self._cur.difficulty * (far_pos - close_pos)
             spawn[:2] += self.np_random.uniform(-DR_SPAWN_NOISE, DR_SPAWN_NOISE, size=2)
             return spawn.astype(np.float64)
 
@@ -792,21 +802,25 @@ class URDualArmEnv(gym.Env):
             "max_obj_height": float(np.max(obj_heights)) if obj_heights else 0.0,
             "mean_obj_to_drop": float(np.mean(obj_to_drop_distances)) if obj_to_drop_distances else 0.0,
             "min_obj_to_drop": float(np.min(obj_to_drop_distances)) if obj_to_drop_distances else 0.0,
-            "curriculum_difficulty": self._difficulty if self.curriculum_mode == "auto" else None,
+            "curriculum_difficulty": self._cur.difficulty if self.curriculum_mode == "auto" else None,
         }
 
         terminated = all(self._arm_done)
         truncated = self._episode_steps >= self.max_episode_steps
 
-        if terminated or truncated:
-            if self.curriculum_mode == "auto":
-                self._success_history.append(float(terminated))
-                if len(self._success_history) >= 10:
-                    rate = sum(self._success_history) / len(self._success_history)
-                    if rate > AUTO_CURRICULUM_INCREASE_THRESH:
-                        self._difficulty = min(1.0, self._difficulty + AUTO_CURRICULUM_STEP)
-                    elif rate < AUTO_CURRICULUM_DECREASE_THRESH:
-                        self._difficulty = max(0.0, self._difficulty - AUTO_CURRICULUM_STEP)
+        done_fraction = sum(self._arm_done) / arm_count
+        info["done_fraction"] = float(done_fraction)
+        info["is_success"] = bool(terminated)
+
+        if (terminated or truncated) and self.curriculum_mode == "auto" and self._curriculum_update:
+            # score = fraction of arms that finished, so one stuck arm doesn't zero the whole scene
+            self._cur.history.append(done_fraction)
+            if len(self._cur.history) >= 10:
+                rate = sum(self._cur.history) / len(self._cur.history)
+                if rate > AUTO_CURRICULUM_INCREASE_THRESH:
+                    self._cur.difficulty = min(1.0, self._cur.difficulty + AUTO_CURRICULUM_STEP)
+                elif rate < AUTO_CURRICULUM_DECREASE_THRESH:
+                    self._cur.difficulty = max(0.0, self._cur.difficulty - AUTO_CURRICULUM_STEP)
 
         if self.render_mode == "human":
             self.render()
