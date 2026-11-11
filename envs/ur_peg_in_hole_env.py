@@ -151,10 +151,14 @@ class PegInHole:
 
     # ---- one insertion trial ---------------------------------------------
     def run(self, k_lin=500.0, k_rot=30.0, lateral_offset=(0.0, 0.0), speed=0.01,
-            t_end=7.0, z_hover=0.03, search=False, f_press=4.0, pitch=0.0004,
-            spiral_hz=1.0, r_max=0.003):
+            t_end=7.0, z_hover=0.03, search=False, f_press=4.0, pitch=0.0008,
+            spiral_hz=1.0, r_max=0.006):
         """search=True: when the peg lands on the top face (axial force) press with f_press and
-        spiral the commanded xy outward (Archimedean) until the peg drops into the hole."""
+        spiral the commanded xy outward (Archimedean) until the peg drops into the hole.
+
+        Defaults (pitch 0.8 mm/rev, r_max 6 mm, press 4 N) come from a sweep at a 4 mm offset: r_max must exceed the
+        offset, a pitch of 0.4 mm/rev or less is too slow to reach it in time, and a press above about 6 N pins the
+        peg to the top face by friction (mu 0.5), so the spring can no longer slide it."""
         mujoco.mj_resetData(self.m, self.d)
         goal_xy = self.hole_pos[:2] + np.array(lateral_offset)   # commanded xy (misaligned if offset != 0)
         start = np.array([goal_xy[0], goal_xy[1], self.hole_pos[2] + z_hover + PEG_LEN])
