@@ -41,6 +41,21 @@ python3 scripts/train/train_dual_arm_live.py --arms 8 --n-envs 2
 
 DAgger policy from [UR3_ROS2_PICK_AND_PLACE](https://github.com/darshmenon/UR3_ROS2_PICK_AND_PLACE) (`ur_rl_training/scripts/render_policy.py`), rendered headless in MuJoCo.
 
+## Peg-in-Hole with Impedance Control (UR5e)
+
+Cartesian impedance control (`tau = J^T [K (x_des - x) - D v] + g(q)`) inserts a 20 mm peg into a square hole with 0.5 mm clearance per side. A force-triggered spiral search (press 4 N, 0.8 mm/rev, up to 6 mm) recovers a misaligned peg.
+
+```bash
+python3 scripts/peg_in_hole/run_impedance_sweep.py   # contact force vs stiffness, split by surface
+python3 scripts/peg_in_hole/run_spiral_search.py     # plain descent vs spiral search
+python3 scripts/peg_in_hole/run_success_sweep.py     # success rate over offset x stiffness (~40 s)
+python3 -m pytest tests                              # env builds, inserts, jams at 4 mm, search recovers it
+```
+
+At K = 800 N/m (4 offset directions each): plain descent inserts up to 0.5 mm offset only; spiral search inserts 100% at 0 to 0.5 mm, 1.5 mm and 3 to 4 mm (75% at 1 mm and 2 mm) and 50% at 5 mm. Spiral search is tuned for K of about 500 to 800 and fails at K = 1200 (the 4 N press leaves too little lateral force to slide the peg). Full table: `results/peg_in_hole_success_sweep.md`.
+
+![success rate](results/peg_in_hole_success_sweep.png)
+
 ## Features
 
 ### Domain Randomisation (`--domain-rand`)
