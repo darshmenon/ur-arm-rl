@@ -20,7 +20,7 @@ setup(
     maintainer="darshmenon",
     maintainer_email="darshmenon02@gmail.com",
     description="ROS 2 policy runner and launch files for mujoco-ur-arm-rl.",
-    license="TODO: License declaration",
+    license="Apache-2.0",
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
